@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+import pytest
 from playwright.sync_api import Locator, Page, TimeoutError as PlaywrightTimeoutError, expect
 
 from utils.config import BASE_URL, DEFAULT_TIMEOUT, RESPONSE_TIMEOUT_SECONDS
@@ -32,12 +33,14 @@ class ChatbotPage:
     def wait_for_chat_ready(self) -> None:
         """Wait until the core chat UI is available."""
         self.page.wait_for_load_state("networkidle", timeout=DEFAULT_TIMEOUT)
+        self._dismiss_disclaimer_if_present()
         self._first_visible_locator(
             [
-                lambda: self.page.locator(".chatContainer"),
                 lambda: self.page.locator("bbsf-textarea textarea"),
                 lambda: self.page.locator(".question-container"),
                 lambda: self.page.locator("sample-question-swiper"),
+                lambda: self.page.locator(".content-body"),
+                lambda: self.page.locator(".chatContainer"),
             ],
             timeout=DEFAULT_TIMEOUT,
         )
@@ -45,13 +48,24 @@ class ChatbotPage:
 
     def is_widget_loaded(self) -> bool:
         """Return True when the chat UI appears loaded."""
+        self._dismiss_disclaimer_if_present()
         try:
-            return self._chat_container().is_visible() or self._message_input().is_visible()
-        except PlaywrightTimeoutError:
+            self._first_visible_locator(
+                [
+                    lambda: self._message_input(),
+                    lambda: self.page.locator("sample-question-swiper"),
+                    lambda: self.page.locator(".content-body"),
+                    lambda: self.page.locator(".chatContainer"),
+                ],
+                timeout=DEFAULT_TIMEOUT,
+            )
+            return True
+        except (AssertionError, PlaywrightTimeoutError):
             return False
 
     def enter_message(self, message: str) -> None:
         """Fill the message textbox."""
+        self._dismiss_disclaimer_if_present()
         input_box = self._message_input()
         expect(input_box).to_be_visible(timeout=DEFAULT_TIMEOUT)
         expect(input_box).to_be_enabled(timeout=DEFAULT_TIMEOUT)
@@ -61,6 +75,7 @@ class ChatbotPage:
 
     def click_send(self) -> None:
         """Click the send button using the most stable available locator."""
+        self._dismiss_disclaimer_if_present()
         send_button = self._send_button()
         expect(send_button).to_be_enabled(timeout=DEFAULT_TIMEOUT)
         send_button.click()
@@ -79,11 +94,13 @@ class ChatbotPage:
         timeout_seconds = timeout or RESPONSE_TIMEOUT_SECONDS
         before_texts = self.get_all_bot_responses()
         self.send_message(message)
+        self._skip_if_recaptcha_visible()
         deadline = time.monotonic() + timeout_seconds
         response = ""
 
         while time.monotonic() < deadline:
             self.page.wait_for_timeout(500)
+            self._skip_if_recaptcha_visible()
             current_responses = self.get_all_bot_responses()
             new_responses = [item for item in current_responses if item not in before_texts]
             candidate = (new_responses[-1] if new_responses else current_responses[-1] if current_responses else "").strip()
@@ -122,15 +139,20 @@ class ChatbotPage:
 
     def get_last_user_message(self) -> str:
         """Return the last visible user message."""
-        candidates = [
-            self.page.locator(".chatContainer [role='option'] .title-user"),
-            self.page.locator(".chatContainer .card-body-user .title-user"),
-            self.page.locator(".chatContainer .title-user"),
-        ]
-        for locator in candidates:
-            count = locator.count()
-            if count:
-                return self._clean_text(locator.nth(count - 1).inner_text())
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            candidates = [
+                self.page.locator(".chatContainer [role='option'] .title-user"),
+                self.page.locator(".chatContainer .card-body-user .title-user"),
+                self.page.locator(".chatContainer .title-user"),
+            ]
+            for locator in candidates:
+                count = locator.count()
+                if count:
+                    message = self._clean_text(locator.nth(count - 1).inner_text())
+                    if message:
+                        return message
+            self.page.wait_for_timeout(200)
         return ""
 
     def is_input_cleared(self) -> bool:
@@ -205,6 +227,10 @@ class ChatbotPage:
         )
         locator.click()
 
+    def skip_if_recaptcha_visible(self) -> None:
+        """Skip the current test when the live site presents a reCAPTCHA challenge."""
+        self._skip_if_recaptcha_visible()
+
     def _message_input(self) -> Locator:
         return self._first_visible_locator(
             [
@@ -232,10 +258,39 @@ class ChatbotPage:
         return self._first_visible_locator(
             [
                 lambda: self.page.locator(".chatContainer"),
+                lambda: self.page.locator(".content-body"),
                 lambda: self.page.locator("[role='listbox'].chatContainer"),
                 lambda: self.page.locator(".content-body [role='listbox']"),
             ]
         )
+
+    def _dismiss_disclaimer_if_present(self) -> None:
+        """Accept the disclaimer gate when it appears before the chat UI."""
+        if not self._is_disclaimer_visible():
+            return
+
+        accept_button = self._first_visible_locator(
+            [
+                lambda: self.page.get_by_role("button", name="Accept and continue"),
+                lambda: self.page.get_by_text("Accept and continue", exact=False),
+                lambda: self.page.get_by_role("button", name="Accept"),
+                lambda: self.page.get_by_text("Agree", exact=False),
+            ],
+            timeout=5_000,
+            raise_on_timeout=False,
+        )
+        if accept_button is None:
+            return
+
+        self.logger.info("Disclaimer detected; accepting before continuing")
+        try:
+            accept_button.click(timeout=5_000)
+        except Exception:
+            if not self._is_disclaimer_visible():
+                return
+            raise
+        self.page.locator("ngb-modal-window").first.wait_for(state="hidden", timeout=DEFAULT_TIMEOUT)
+        self.page.wait_for_load_state("networkidle", timeout=DEFAULT_TIMEOUT)
 
     def _last_response_locator(self) -> Locator:
         candidates = [
@@ -253,7 +308,8 @@ class ChatbotPage:
         self,
         factories: list[LocatorFactory],
         timeout: int = 5000,
-    ) -> Locator:
+        raise_on_timeout: bool = True,
+    ) -> Locator | None:
         deadline = time.monotonic() + (timeout / 1000)
         last_error: Exception | None = None
         while time.monotonic() < deadline:
@@ -265,13 +321,58 @@ class ChatbotPage:
                 except Exception as exc:  # noqa: BLE001
                     last_error = exc
             self.page.wait_for_timeout(200)
+        if not raise_on_timeout:
+            return None
         if last_error:
-            raise last_error
+            raise AssertionError(
+                "No visible locator matched the configured fallback selectors."
+            ) from last_error
         raise AssertionError("No visible locator matched the configured fallback selectors.")
 
     @staticmethod
     def _clean_text(text: str | None) -> str:
         return " ".join((text or "").split()).strip()
+
+    def _has_visible_chat_ui(self) -> bool:
+        indicators = [
+            self.page.locator("bbsf-textarea textarea"),
+            self.page.locator(".question-container textarea"),
+            self.page.locator("sample-question-swiper"),
+            self.page.locator(".content-body"),
+        ]
+        for locator in indicators:
+            try:
+                if locator.count() and locator.first.is_visible():
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
+
+    def _is_disclaimer_visible(self) -> bool:
+        modal = self.page.locator("ngb-modal-window")
+        if not modal.count():
+            return False
+        try:
+            return modal.first.is_visible()
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _is_recaptcha_visible(self) -> bool:
+        candidates = [
+            self.page.locator("iframe[title*='reCAPTCHA']"),
+            self.page.locator("iframe[src*='recaptcha']"),
+        ]
+        for locator in candidates:
+            try:
+                if any(locator.nth(index).is_visible() for index in range(locator.count())):
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
+
+    def _skip_if_recaptcha_visible(self) -> None:
+        if self._is_recaptcha_visible():
+            pytest.skip("Live site presented a reCAPTCHA challenge, blocking automated response validation.")
 
     def _element_direction(self, locator: Locator) -> str:
         try:

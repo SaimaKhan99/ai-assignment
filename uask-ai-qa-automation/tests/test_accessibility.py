@@ -25,6 +25,13 @@ def test_send_button_keyboard_access(chat_page):
     prompt = "How do I renew my UAE visa?"
     chat_page.enter_message(prompt)
     send_button.focus()
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if send_button.evaluate("element => document.activeElement === element"):
+            break
+        chat_page.page.wait_for_timeout(200)
+
     assert send_button.evaluate("element => document.activeElement === element")
     send_button.press("Enter")
 
@@ -52,11 +59,13 @@ def test_user_can_submit_with_keyboard_if_supported(chat_page):
 
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
+        chat_page.skip_if_recaptcha_visible()
         current_responses = chat_page.get_all_bot_responses()
         if any(response not in previous_responses and len(response) > 20 for response in current_responses):
             break
         chat_page.page.wait_for_timeout(500)
 
+    chat_page.skip_if_recaptcha_visible()
     assert any(
         response not in previous_responses and len(response) > 20
         for response in chat_page.get_all_bot_responses()
