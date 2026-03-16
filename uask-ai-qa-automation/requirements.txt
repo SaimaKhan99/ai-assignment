@@ -1,0 +1,6 @@
+playwright
+pytest
+pytest-html
+sentence-transformers
+torch
+numpy
