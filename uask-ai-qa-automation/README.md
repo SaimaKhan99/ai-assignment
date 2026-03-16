@@ -8,123 +8,211 @@ Target application:
 
 - `https://beta-ask.u.ae/en/uask`
 
-The framework validates:
+The framework is designed to validate:
 
 - Chatbot UI behavior
-- AI response rendering quality
-- English and Arabic response behavior
+- AI response quality and structure
+- English and Arabic behavior
 - Prompt injection resistance
-- XSS and suspicious input handling
+- XSS-style and suspicious input handling
 - Lightweight hallucination heuristics
 - Reliability and semantic consistency
 - Response latency
 - Basic accessibility behavior
-- Logging, screenshots, and HTML reporting
+- Logs, screenshots, and HTML reporting
 
-## Why AI/LLM Testing Differs From Traditional Automation
+## Why AI Testing Is Different
 
-Traditional UI and API automation usually validates deterministic outputs. LLM systems are different:
+Traditional UI and API tests usually validate deterministic outputs. LLM-based systems are different:
 
-- Responses vary in wording even when behavior is correct.
-- Exact string matching is usually the wrong assertion strategy.
-- A response can be syntactically valid but semantically irrelevant.
-- Security validation must include adversarial prompts, not just malformed inputs.
-- Reliability is measured through relevance, structure, and consistency, not exact duplication.
+- Responses can vary in wording while still being correct.
+- Exact string matching is often the wrong assertion strategy.
+- A response may look fluent but still be irrelevant or partially wrong.
+- Security validation must include adversarial prompting, not just malformed payloads.
+- Reliability must be measured through relevance, stability, and semantic consistency.
 
-This framework uses layered validation to reflect those realities:
+To reflect that, this framework combines multiple layers of validation:
 
-- Basic non-empty checks
+- Non-empty response checks
 - Structural sanity checks
 - Keyword relevance checks
-- Semantic similarity checks with `all-MiniLM-L6-v2`
-- Heuristic hallucination and adversarial-behavior checks
+- Semantic similarity using `all-MiniLM-L6-v2`
+- Heuristic hallucination detection
+- Security-focused guardrail checks
 
-## Framework Architecture
+## Tech Stack
+
+- Python `3.11+`
+- `pytest`
+- `playwright`
+- `pytest-html`
+- `sentence-transformers`
+- `torch`
+- `numpy`
+
+## Framework Design
 
 The framework is organized around:
 
-- Page Object Model for resilient UI interaction
+- Page Object Model for resilient live-site interaction
 - Validator classes for AI-specific assertions
-- Utility modules for logging, screenshots, performance, and language detection
+- Utility modules for logging, screenshots, language handling, and timing
 - JSON-driven test data
-- Pytest fixtures for browser/session reuse
+- Shared pytest fixtures for browser reuse
 
-Key design choices:
+Key design decisions:
 
-- Live-site aware selectors use a fallback strategy
-- Assertions are tolerant to wording variation
-- Failure artifacts are automatically captured
-- Config values are centralized and easy to extend
+- Fallback selectors are used because the target is a live beta site.
+- Assertions are tolerant to wording variation.
+- Failure artifacts are captured automatically.
+- Config values are centralized in `utils/config.py`.
+- The current live flow includes auto-handling for the disclaimer modal.
+- Response-driven tests skip when the live site presents reCAPTCHA, because that blocks automation rather than indicating a product failure.
 
-## Folder Structure
+## Project Structure
 
 ```text
 uask-ai-qa-automation/
-├── tests/
-│   ├── conftest.py
-│   ├── test_ui_behavior.py
-│   ├── test_ai_responses.py
-│   ├── test_multilingual.py
-│   ├── test_security.py
-│   ├── test_performance.py
-│   ├── test_reliability.py
-│   └── test_accessibility.py
 ├── pages/
 │   └── chatbot_page.py
-├── validators/
-│   ├── response_validator.py
-│   ├── semantic_validator.py
-│   ├── hallucination_detector.py
-│   └── security_validator.py
-├── utils/
-│   ├── logger.py
-│   ├── language_utils.py
-│   ├── performance_utils.py
-│   ├── screenshot_utils.py
-│   └── config.py
 ├── testdata/
 │   └── test-data.json
-├── screenshots/
+├── tests/
+│   ├── conftest.py
+│   ├── test_accessibility.py
+│   ├── test_ai_responses.py
+│   ├── test_multilingual.py
+│   ├── test_performance.py
+│   ├── test_reliability.py
+│   ├── test_security.py
+│   └── test_ui_behavior.py
+├── utils/
+│   ├── config.py
+│   ├── language_utils.py
+│   ├── logger.py
+│   ├── performance_utils.py
+│   └── screenshot_utils.py
+├── validators/
+│   ├── hallucination_detector.py
+│   ├── response_validator.py
+│   ├── security_validator.py
+│   └── semantic_validator.py
 ├── logs/
 ├── reports/
-├── .gitignore
+├── screenshots/
 ├── requirements.txt
 └── README.md
 ```
 
+## Test Coverage
+
+### UI behavior
+
+Validates:
+
+- Page load
+- Input visibility and readiness
+- Sending a message
+- Bot response rendering
+- Input clearing
+- Scroll behavior
+- Mobile view load
+
+### AI response validation
+
+Validates:
+
+- Response presence
+- Readability and structure
+- Fallback response detection
+- Intent keyword relevance
+- Semantic alignment to expected intent
+
+### Multilingual validation
+
+Validates:
+
+- Arabic response behavior
+- Arabic script presence
+- RTL direction support
+- Cross-language consistency between English and Arabic prompts
+
+### Security validation
+
+Validates:
+
+- XSS-style payload handling
+- SQL-like string handling
+- Prompt injection resistance
+- Raw HTML rendering avoidance
+
+### Performance validation
+
+Validates:
+
+- End-to-end response latency against configured thresholds
+
+### Reliability validation
+
+Validates:
+
+- Repeated-query consistency
+- Relevance across repeated responses
+- Continued input usability
+
+### Accessibility validation
+
+Validates:
+
+- Input discoverability
+- Keyboard flow around the send action
+- Keyboard-based submission behavior
+
 ## Prerequisites
+
+You need:
 
 - Python `3.11+`
 - Internet access to the live U-Ask beta site
 - Ability to download Playwright browser binaries
+- Enough disk and memory for `torch` and `sentence-transformers`
 
-## Setup Instructions
+Important environment note:
 
-Clone or place this project locally, then work from the repository root:
+- Use `python3.11` explicitly if your machine defaults to an older Python.
+- Use `PYTHONPATH=.` when running `pytest`, because the repository imports local folders such as `pages` and `validators` directly.
+
+## Setup
+
+From the repository root:
 
 ```bash
 cd uask-ai-qa-automation
-```
-
-## Install Dependencies
-
-```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
+python -m playwright install chromium
+export PYTHONPATH=.
 ```
 
-## Install Playwright Browsers
+## Run The Tests
+
+### Collect tests only
+
+Useful to verify imports and discovery:
 
 ```bash
-playwright install
+pytest --collect-only -q
 ```
 
-## How To Run All Tests
+### Run the full suite
 
 ```bash
 pytest tests --html=reports/report.html --self-contained-html
 ```
 
-## How To Run Individual Test Files
+### Run individual test files
 
 ```bash
 pytest tests/test_ui_behavior.py
@@ -136,69 +224,172 @@ pytest tests/test_reliability.py
 pytest tests/test_accessibility.py
 ```
 
-## How To Generate HTML Report
+### Run a single test
 
 ```bash
-pytest tests --html=reports/report.html --self-contained-html
+pytest tests/test_ui_behavior.py::test_chat_page_loads -q
 ```
 
-Generated artifacts:
+## Reports And Artifacts
+
+Generated outputs:
 
 - HTML report: `reports/report.html`
-- Logs: `logs/test_execution.log`
+- Execution log: `logs/test_execution.log`
 - Failure screenshots: `screenshots/`
 
-## Test Categories Explained
+## Configuration
 
-### UI
+Runtime values are controlled in `utils/config.py`.
 
-Validates that the chatbot loads, accepts input, sends messages, renders responses, clears the input, supports scrolling, and works in desktop and mobile contexts.
+Supported environment variables:
 
-### AI Response Validation
+- `UASK_BASE_URL`
+- `UASK_DEFAULT_TIMEOUT_MS`
+- `UASK_RESPONSE_TIMEOUT_SECONDS`
+- `UASK_STRICT_RESPONSE_TIME_SECONDS`
+- `UASK_SOFT_RESPONSE_TIME_SECONDS`
+- `UASK_SEMANTIC_SIMILARITY_THRESHOLD`
+- `UASK_CONSISTENCY_SIMILARITY_THRESHOLD`
+- `UASK_MOBILE_DEVICE`
 
-Validates response completeness, structure, fallback detection, keyword relevance, and semantic alignment against the intended public-service topic.
+Example:
 
-### Multilingual
+```bash
+export UASK_RESPONSE_TIMEOUT_SECONDS=45
+export UASK_SEMANTIC_SIMILARITY_THRESHOLD=0.40
+pytest tests/test_ai_responses.py
+```
 
-Checks English and Arabic response behavior, Arabic script presence, RTL compatibility, and intent consistency across both languages.
+## Current Live-Site Behavior Handled By The Framework
 
-### Security
+The current automation includes workarounds for live-site behavior that can interfere with tests:
 
-Covers XSS-style payloads, SQL-like strings, and prompt injection attempts to ensure the chatbot remains stable, safe, and on-domain.
+- Disclaimer modal is detected and accepted automatically.
+- User message extraction waits briefly for the transcript to update.
+- Response-dependent tests skip when visible reCAPTCHA blocks automation.
 
-### Performance
+These are live-environment concerns, not application-code concerns inside this repository.
 
-Measures end-to-end response latency from send action until a bot response is detected.
+## Challenges Faced
 
-### Reliability
+The following issues were encountered while building and stabilizing the framework against the live site:
 
-Repeats prompts and compares responses for semantic consistency and platform stability.
+### 1. Live disclaimer modal blocked initial interaction
 
-### Accessibility
+The chatbot now presents a disclaimer before interaction. Early selectors looked valid because the chat UI was rendered in the background, but the modal still intercepted clicks.
 
-Checks practical basics such as keyboard interaction, input discoverability, and accessible attributes on input and action controls.
+How it was handled:
+
+- Added modal detection and automatic acceptance before interacting with the page.
+- Added defensive checks before input and send actions.
+
+### 2. Local import path issue during pytest execution
+
+Running plain `pytest` did not always resolve local imports such as `pages` and `validators`.
+
+How it was handled:
+
+- Standardized execution with `PYTHONPATH=.`.
+- Documented the requirement in this README.
+
+### 3. Python version mismatch across environments
+
+Some environments had `python3` pointing to Python `3.10`, while the project dependencies and runtime expectations align better with Python `3.11+`.
+
+How it was handled:
+
+- Documented use of `python3.11`.
+- Recommended a dedicated virtual environment.
+
+### 4. Playwright browser binaries were not installed by default
+
+Even when the Python package was installed, Playwright could not launch Chromium until the browser binary was downloaded.
+
+How it was handled:
+
+- Added explicit `python -m playwright install chromium` to setup instructions.
+
+### 5. Live-site selector drift
+
+Because the target is a live beta site, some selectors and interaction timing are unstable.
+
+How it was handled:
+
+- Used fallback selectors in the page object.
+- Added readiness and transcript polling where the UI updates asynchronously.
+
+### 6. reCAPTCHA challenge on bot response submission
+
+The live site sometimes presents reCAPTCHA after a prompt is submitted. This blocks response automation and can cause false failures if treated as a product issue.
+
+How it was handled:
+
+- Added reCAPTCHA detection.
+- Response-based tests skip instead of failing with misleading timeout errors.
+
+### 7. LLM nondeterminism
+
+The chatbot does not always return identical wording for the same prompt.
+
+How it was handled:
+
+- Avoided exact string matching for core validations.
+- Used semantic similarity, structure checks, and keyword presence instead.
+
+### 8. Latency and environment variability
+
+The live beta environment can have network delays, fluctuating response times, or temporary instability.
+
+How it was handled:
+
+- Centralized timeout configuration.
+- Captured logs and screenshots for debugging.
+- Kept assertions tolerant where appropriate.
 
 ## Assumptions And Limitations
 
-- The framework targets the live beta environment, so occasional content and latency variation is expected.
-- DOM selectors can evolve; the page object uses fallback locator strategies to reduce brittleness.
-- Semantic similarity uses `all-MiniLM-L6-v2` as required. This is helpful but not a source-of-truth validator.
-- Hallucination detection is heuristic-based and intentionally lightweight.
-- No external truth-source API is used for factual verification.
-- Because the application is live, transient failures may still occur due to environment or service instability.
+- The framework targets a live beta environment, so transient failures can still happen.
+- Some response-oriented tests may skip when reCAPTCHA blocks automation.
+- Semantic similarity is useful for intent validation, but it is not a source of truth.
+- Hallucination detection is heuristic-based.
+- No external truth-source API is used for factual validation.
+- Selector drift is always possible on a live site.
+
+## Suggested Verification Flow
+
+If you want a practical local run order, use:
+
+```bash
+pytest tests/test_ui_behavior.py -q
+pytest tests/test_accessibility.py -q
+pytest tests/test_ai_responses.py -q
+pytest tests/test_multilingual.py -q
+pytest tests/test_security.py -q
+pytest tests/test_performance.py -q
+pytest tests/test_reliability.py -q
+```
+
+This gives faster feedback on setup and interaction issues before running the full suite.
 
 ## Future Improvements
 
-- Add API mocking for faster and more deterministic lower-environment testing
-- Add external truth-source validation for critical government facts
-- Add CI/CD integration with GitHub Actions, Azure DevOps, or Jenkins
-- Add visual regression snapshots for major UI states
-- Extend accessibility automation beyond basics with axe-core and deeper WCAG coverage
+- Add CI workflow for automated scheduled runs
+- Add structured test markers such as `smoke`, `live`, `security`, and `accessibility`
+- Add richer reporting for skip reasons
+- Add lower-environment or mocked execution mode to avoid reCAPTCHA
+- Add API-level validation if service endpoints become available
+- Extend accessibility checks with `axe-core`
+- Add screenshot or visual regression coverage for major UI states
 
 ## Suggested CI Commands
 
 ```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
-playwright install
+python -m playwright install chromium
+export PYTHONPATH=.
 pytest tests --html=reports/report.html --self-contained-html
 ```
