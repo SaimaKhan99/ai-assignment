@@ -9,10 +9,4 @@ venv/
 .idea/
 .vscode/
 
-screenshots/*.png
-logs/*.log
-reports/*.html
-reports/*.xml
 
-playwright-report/
-test-results/
